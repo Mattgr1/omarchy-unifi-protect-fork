@@ -52,6 +52,11 @@
 
 set -uo pipefail
 
+# The plugin directory, resolved from this file rather than from the caller's
+# working directory, so the pinned requirements file is found wherever the
+# plugin was installed.
+PLUGIN_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+
 # Frames are pictures of the inside of your house, and the archive keeps them
 # for as long as you leave it there. Nothing written below is meant to be read
 # by another account on this machine, so the umask says so once rather than
@@ -759,15 +764,27 @@ asyncio.run(main())
       [[ "$answer" == [yY]* ]] || { printf 'Nothing installed.\n' >&2; exit 1; }
     fi
 
+    # Exactly the bytes named in requirements.txt, which lives in this
+    # repository and carries a version and a digest for every file pip is
+    # allowed to fetch. An unpinned `pip install websockets` resolves against
+    # a registry that may serve different code tomorrow, so what a reviewer
+    # approved would not be what later runs here. --require-hashes also fails
+    # the whole install if any requirement is unpinned, and --no-deps keeps a
+    # transitive dependency from arriving unhashed through the back door.
+    #
+    # uv is deliberately not used even when present: its pip surface takes
+    # these flags differently, and one installer with one behaviour is easier
+    # to reason about than two.
+    req="$PLUGIN_DIR/requirements.txt"
+    [[ -f "$req" && ! -L "$req" ]] ||
+      { printf 'missing %s, refusing to install anything\n' "$req" >&2; exit 1; }
     python3 -m venv "$VENV_DIR" ||
       { printf 'could not create %s\n' "$VENV_DIR" >&2; exit 1; }
-    if command -v uv >/dev/null 2>&1; then
-      uv pip install --python "$VENV_PYTHON" websockets ||
-        { printf 'could not install websockets\n' >&2; exit 1; }
-    else
-      "$VENV_PYTHON" -m pip install websockets ||
-        { printf 'could not install websockets\n' >&2; exit 1; }
-    fi
+    "$VENV_PYTHON" -m pip install --require-hashes --no-deps --only-binary :all: \
+        --disable-pip-version-check -r "$req" ||
+      "$VENV_PYTHON" -m pip install --require-hashes --no-deps \
+        --disable-pip-version-check -r "$req" ||
+      { printf 'could not install websockets\n' >&2; exit 1; }
     "$VENV_PYTHON" -c 'import websockets' >/dev/null 2>&1 ||
       { printf 'installed, but the import still fails\n' >&2; exit 1; }
     printf '\nDone: %s\nRestart the shell to pick it up.\n' "$VENV_PYTHON"

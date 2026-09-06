@@ -1,0 +1,49 @@
+# Motion events need the python websockets package. This file pins exactly
+# which bytes may be installed, because the review that approves this plugin
+# has to bind to something that cannot change afterwards: an unpinned
+# `pip install websockets` resolves against a registry that is free to serve
+# different code tomorrow, and that code runs on this machine.
+#
+# Reported at the security review of the marketplace submission:
+# https://github.com/omacom/omarchy-plugin-marketplace/issues/3558#issuecomment-5544021186
+#
+# The wheels are the Linux ones this widget can actually run on, plus the
+# source archive as a fallback. `pip --require-hashes` refuses anything whose
+# digest is not in here, and refuses the whole install if any requirement is
+# unpinned, so this file is the boundary rather than a suggestion.
+#
+# To move to a new version: bump it here with its hashes, in one commit, and
+# ask for a re-check. Do not widen the pin.
+websockets==17.1 \
+    --hash=sha256:0c84bdef916556cbe1d5a43b423398be4dd3cba6522b463e53d848578b920695 \
+    --hash=sha256:47a62d6045c6eaa0d8f97bc2fb68b8cf90077a0cbfd4e83d6f2d2145611ee134 \
+    --hash=sha256:00679b7468b4c2b12b0757118174e8eabac56bb2f579a928a104d9554a56e098 \
+    --hash=sha256:f8e822efd54137d8cc8310eb64635ab827a4a6c72ff08691f38aa624776d8ecb \
+    --hash=sha256:0c863507ada5805517ca6dff1c524dcd42942efe6304dacf06700878398d21a6 \
+    --hash=sha256:d41ef69d5416fbc1d98cf96c37be6192d10fd101c3e0f8b3ddc36e09432b3c08 \
+    --hash=sha256:f62114a54117e4948a1e414e89521f7fe1e3c2f83f2a571a06a4fc6718b0900a \
+    --hash=sha256:ccbf3f4a9890d50b3a08ee04029fde30a03bfdeffaa19977628bf17251764e60 \
+    --hash=sha256:c3241d684a76eaaef8b2dc789afde4343cd3aad55ea81e4e8ab3605b529bae51 \
+    --hash=sha256:e5f5c7a893507d0e83a80b88aefd6522f7e882cd53f9722c6f23f5a020c9557c \
+    --hash=sha256:43bd0c1ceb924d67f5c1a5254d8361dd9d94246e6331a726064dfa2917880780 \
+    --hash=sha256:073c5c3f7e127041fa9d34a9e29ceefee8c3cafbd267ed2927318f425144380d \
+    --hash=sha256:6f42912fa9eb4cb7c7ec9fde9b3332ba339eb8a8811981043d4029599f3d950b \
+    --hash=sha256:f98bf378d7a5be047a044a1a27c987a8f355e10e3b5754617dbe756248cbc5ce \
+    --hash=sha256:f7233eaf441a345a5943a929fd4b5ea3278f11aed35a9ed0f3106b8cb3ca846a \
+    --hash=sha256:5d4724255fb8398acd9e583b97eb2279cec20e0bd0f9a94bf75f6056ef9f13da \
+    --hash=sha256:50903d335bfda026c2fa11dd9aed09d8cbee0c451e3a85122a9acb041b7dc69b \
+    --hash=sha256:5a74531ce81af587f906ab42f194032388fcff8fc7938402e5917c9147a39441 \
+    --hash=sha256:aec00f018d34c67500ff0438dc314b40277be4a1b983cbacbf53ccf7db63e257 \
+    --hash=sha256:b65d5fe48219dc2d5e158de9e6514e75600f379cc7e37108d35f31764c155566 \
+    --hash=sha256:d7b349265fad6244013eecd99df8d83c12bf3013943e431f4fadd5bffc37db42 \
+    --hash=sha256:dc5789e5ea182b77a38881383ada5347202a6c66f4857d054e075290e80b604b \
+    --hash=sha256:33e45c7ea38428e740a7f233555d71df0b875cef7fc080acebc9654475e35335 \
+    --hash=sha256:f4c45ee2512d3757b5e6c67c5a34e435143f2ecb7df3324f9fd888688c45c0f4 \
+    --hash=sha256:a7b35181a14cbfcae163b4de545d22abfd07d06c2c41ca69cfcd99251d6888ab \
+    --hash=sha256:6a8e768a048c2220697477ce2e67e4345dc9f693d0ee6af53945b5e30227c6a7 \
+    --hash=sha256:bb0efe019480a1c93e168ce96479273aaebd672fc8c350d5eed1e507ababb1b8 \
+    --hash=sha256:f58f58b4b29bbea2a3635e2c56eff4a3adab011fe383802a9e542e31b97085fc \
+    --hash=sha256:8d1b108bd8f5f6a8b90801f6db3b3858d5deca889acfdb8ac497bbb24e4b0edf \
+    --hash=sha256:a62d8c424383c9dc769ff3672018df822603117e32686e567d452ed035b6fb2e \
+    --hash=sha256:f221081107b8c48184d99f7019604486376e7ef826037e70aad6b02540732c23 \
+    --hash=sha256:acfea4c20bf54384883ea33b1240fc1db4f52e190823a4e2b334bc3e8bfca96a
