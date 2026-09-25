@@ -125,6 +125,14 @@ me" rather than a change to the config. It starts from `notify` each time the
 shell starts and does not write it back, and the bar icon still lights up on
 motion either way, since that part is silent anyway.
 
+Beside that switch is a second button, labeled `M`/`S`, for the camera's own
+audio. Live cameras with a microphone carry sound in their RTSP stream, but a
+camera popping up and talking without warning is worse than a silent one, so
+it starts muted the first time the shell starts and has to be turned on by
+hand. Like the notify switch it does not write to settings; unlike it, the
+choice persists for the rest of the session across opening and closing the
+panel, and only resets to muted on the next shell restart.
+
 The console address, the API key, which cameras may interrupt you, and the
 motion notification live in the widget's own settings view (the gear on
 the panel). The rest, panel width, snapshot interval and how long the icon
