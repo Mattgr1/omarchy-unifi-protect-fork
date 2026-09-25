@@ -35,6 +35,12 @@ Panel {
   readonly property string iconCamera: "\uf03d"
   readonly property string iconGear: "\u2699"
   readonly property string iconBack: "\u2190"
+  // Plain ASCII letters, not an icon-font glyph: several candidate
+  // codepoints (FontAwesome \uf028/\uf026, the Nerd Font set used by the
+  // shell's own audio widget) all rendered as nothing in this bar's
+  // configured font, so this sidesteps font-coverage entirely.
+  readonly property string iconSoundOn: "S"
+  readonly property string iconSoundOff: "M"
 
   // The script that does the talking sits next to this file, so the plugin
   // runs from wherever it was installed without putting anything on $PATH.
@@ -354,7 +360,7 @@ Panel {
     }
   }
 
-  Component.onCompleted: cachedProc.running = true
+  Component.onCompleted: { cachedProc.running = true }
 
   // Slow, because this only feeds the still behind the video: a fresh one
   // matters when the stream is still connecting or has dropped out, not while
@@ -494,6 +500,11 @@ Panel {
   // than surviving a restart -- closer to muting an alert than to changing a
   // setting.
   property bool notifyEnabled: notify
+
+  // Trying out live audio: off by default, per-session only (like
+  // notifyEnabled above), so a camera mic never surprises you and a
+  // restart always comes back silent until you opt in again.
+  property bool soundEnabled: false
 
   function capture(id) {
     var now = Date.now()
@@ -970,7 +981,7 @@ Panel {
         width: parent.width
         visible: root.view === "cameras"
         height: Math.max(camerasHeader.implicitHeight, gearBtn.implicitHeight,
-                         notifySwitch.implicitHeight)
+                         soundBtn.implicitHeight, notifySwitch.implicitHeight)
 
         PanelSectionHeader {
           id: camerasHeader
@@ -994,7 +1005,7 @@ Panel {
         // declaration order, not the order things sit on screen.
         ToggleSwitch {
           id: notifySwitch
-          anchors.right: gearBtn.left
+          anchors.right: soundBtn.left
           anchors.rightMargin: Style.space(8)
           anchors.verticalCenter: parent.verticalCenter
           checked: root.notifyEnabled
@@ -1009,6 +1020,18 @@ Panel {
                                      : "Notifications on motion: off"
             fontFamily: root.fontFamily
           }
+        }
+
+        PanelActionButton {
+          id: soundBtn
+          anchors.right: gearBtn.left
+          anchors.rightMargin: Style.space(8)
+          anchors.verticalCenter: parent.verticalCenter
+          iconText: root.soundEnabled ? root.iconSoundOn : root.iconSoundOff
+          tooltipText: root.soundEnabled ? "Live audio: on" : "Live audio: off"
+          foreground: root.foreground
+          fontFamily: root.fontFamily
+          onClicked: root.soundEnabled = !root.soundEnabled
         }
 
         PanelActionButton {
@@ -1093,12 +1116,18 @@ Panel {
         // Playing only while the panel is open. A camera stream left running
         // behind a closed panel is a decoder and a few megabits a second for
         // a picture nobody is looking at.
+        AudioOutput {
+          id: audioOut
+          // Muted rather than absent: root.soundEnabled is the only thing
+          // that should make a camera mic audible, and it defaults off.
+          muted: !root.soundEnabled
+        }
+
         MediaPlayer {
           id: player
           videoOutput: video
+          audioOutput: audioOut
           source: root.opened && root.view === "cameras" && !root.reviewing ? root.selectedStream : ""
-          // No AudioOutput is attached on purpose: without one Qt plays the
-          // video and drops the audio track, which is what a bar panel wants.
 
           property bool showingVideo: false
 
