@@ -41,6 +41,9 @@ Panel {
   // configured font, so this sidesteps font-coverage entirely.
   readonly property string iconSoundOn: "S"
   readonly property string iconSoundOff: "M"
+  // Also a plain letter for the same font-coverage reason as the sound
+  // button above: this opens a detached mpv window, not part of this panel.
+  readonly property string iconPopout: "P"
 
   // The script that does the talking sits next to this file, so the plugin
   // runs from wherever it was installed without putting anything on $PATH.
@@ -111,9 +114,21 @@ Panel {
   // python-websockets is missing showed a widget that simply never lit up.
   property string motionNotice: ""
   property string selectedId: ""
-  // "cameras" or "settings". Setup that is still missing a key lands on
-  // settings instead of the dead "Protect unreachable" text.
+  // "cameras" (one camera, large, with thumbnails to switch), "grid" (every
+  // camera as an equal tile, the panel's starting view), or "settings".
+  // Setup that is still missing a key lands on settings instead of the dead
+  // "Protect unreachable" text.
   property string view: "settings"
+  // Set just before toggle() when the bar icon or its motion label is
+  // clicked while a camera is actively alerting, so the panel opens
+  // straight on that camera instead of on the grid -- the click was already
+  // "which camera", the grid would only ask the question a second time.
+  // Consumed and cleared the moment the panel opens.
+  property bool openViaAlert: false
+  // What to return to when backing out of settings: whichever of "grid" or
+  // "cameras" was showing when the gear was pressed. Settings itself is
+  // never a value here.
+  property string preSettingsView: "grid"
   property bool hasKey: false
   // Whether the gateway's certificate has been pinned. Until it has, no
   // request carries the key: the console signs its own certificate, so a
@@ -179,6 +194,18 @@ Panel {
   function cameraById(id) {
     for (var i = 0; i < cameras.length; i++) if (cameras[i].id === id) return cameras[i]
     return null
+  }
+
+  // How many columns the tile grid uses for a given camera count, so it
+  // always lands on two or three rows rather than one long strip or one
+  // starved column. Anything this settles on is still just a starting
+  // point: the panel is a fixed width, so more cameras always means
+  // smaller tiles, never a taller grid than fits without scrolling.
+  function gridColumns(n) {
+    if (n <= 1) return 1
+    if (n <= 4) return 2                          // 2x2 or smaller
+    if (n <= 6) return Math.ceil(n / 2)            // 2 rows
+    return Math.ceil(n / 3)                        // 3 rows, 7+
   }
 
   // Repeater rebuilds every delegate when the model is replaced, which blanks
@@ -377,12 +404,14 @@ Panel {
 
   // Walks the list one camera at a time so the thumbnails fill in staggered
   // rather than all at once, which keeps three snapshot requests off the
-  // gateway in the same instant.
+  // gateway in the same instant. Runs in the grid too -- every tile there is
+  // a thumbnail -- not only behind the single-camera view's thumbnail row.
   Timer {
     id: thumbTimer
     property int cursor: 0
     interval: 1500
-    running: root.opened && root.view === "cameras" && root.cameras.length > 1
+    running: root.opened && (root.view === "cameras" || root.view === "grid")
+      && root.cameras.length > 1
     repeat: true
     triggeredOnStart: true
     onTriggered: {
@@ -400,7 +429,16 @@ Panel {
     if (opened) {
       if (root.needsSetup) root.showSettings()
       else if (root.needsTrust) root.showTrust()
-      else if (!root.userWantsSettings) root.showCameras()
+      else if (!root.userWantsSettings) {
+        // A click that was already "which camera" -- the bar icon or its
+        // motion label, while a camera was actively alerting -- lands
+        // straight on that camera. Any other opening, including the very
+        // first one, lands on the grid: asking "which camera" is the point
+        // of a fresh open.
+        if (root.openViaAlert) root.showCameras()
+        else root.showGrid()
+        root.openViaAlert = false
+      }
       root.refreshStatus()
       thumbTimer.cursor = 0
       root.grab(mainShot, root.selectedId)
@@ -655,6 +693,7 @@ Panel {
   }
 
   function showSettings() {
+    if (view !== "settings" && view !== "trust") preSettingsView = view
     view = "settings"
     if (hostField) hostField.text = root.host
     Qt.callLater(function() { root.focusField(keyField) })
@@ -663,6 +702,31 @@ Panel {
   function showCameras() {
     userWantsSettings = false
     view = "cameras"
+  }
+
+  // The grid of every camera as an equal tile: what the panel opens on, and
+  // where the header's back arrow returns to from a single camera.
+  function showGrid() {
+    userWantsSettings = false
+    view = "grid"
+  }
+
+  // A tile in the grid was clicked: that camera becomes selected and the
+  // panel switches to the large single-camera view, exactly the view a
+  // fresh install opened straight into before there was a grid.
+  function openCamera(id) {
+    if (id === "") return
+    selectedId = id
+    showCameras()
+    grab(mainShot, id)
+    resolveStream(id)
+  }
+
+  // Leaving settings by the back arrow: grid or single-camera, whichever it
+  // interrupted, restored exactly rather than always landing on one of them.
+  function leaveSettings() {
+    userWantsSettings = false
+    view = (preSettingsView === "cameras") ? "cameras" : "grid"
   }
 
   function showTrust() {
@@ -760,6 +824,35 @@ Panel {
     root.close()
   }
 
+  // ------------------------------------------------------------------- popout
+
+  // Detaches a camera into its own window: a plain mpv, started through
+  // `setsid -f` so it keeps running once this process exits, matched by a
+  // Hyprland window rule (see ~/.config/hypr/windows.lua) on the app id the
+  // script gives it, which floats, pins and sizes it -- the desktop-level
+  // equivalent of what this panel already does for the large view, just
+  // outside the panel and free to be dragged, resized or left running
+  // after the panel closes.
+  Process {
+    id: popoutProc
+    stdout: StdioCollector {
+      onStreamFinished: {
+        var ok = false
+        try { ok = JSON.parse(text).ok === true } catch (e) { ok = false }
+        if (!ok) root.motionNotice = "could not pop out that camera"
+      }
+    }
+  }
+
+  function popout(id) {
+    if (id === "" || popoutProc.running) return
+    var args = ["popout", id]
+    var name = nameOf(id)
+    if (name !== "?") args.push(name)
+    popoutProc.command = root.cmd(args)
+    popoutProc.running = true
+  }
+
   // ----------------------------------------------------------------- setup
 
   Process {
@@ -792,7 +885,7 @@ Panel {
         if (ok) {
           root.trusted = true
           root.trustInfo = null
-          root.showCameras()
+          root.showGrid()
           root.refresh()
         } else {
           // The certificate moved between showing it and agreeing to it, or
@@ -820,7 +913,12 @@ Panel {
             // at before the key is allowed anywhere near the wire.
             if (root.view !== "trust") root.showTrust()
           } else if (root.opened && !root.userWantsSettings) {
-            root.showCameras()
+            // Only a forced trip to settings or the trust screen gets
+            // walked back automatically; an active grid or single-camera
+            // view is left alone so a routine status poll -- this runs
+            // every ten minutes while the panel might be open -- cannot
+            // yank the panel out of whichever view is already on screen.
+            if (root.view === "settings" || root.view === "trust") root.showGrid()
           }
         } catch (e) {
         }
@@ -909,7 +1007,10 @@ Panel {
         return
       }
       // A camera that just saw something is the one you opened the panel for.
-      if (!root.opened && root.motionId !== "") root.selectedId = root.motionId
+      if (!root.opened && root.motionId !== "") {
+        root.selectedId = root.motionId
+        root.openViaAlert = true
+      }
       root.toggle()
     }
   }
@@ -931,6 +1032,7 @@ Panel {
       cursorShape: Qt.PointingHandCursor
       onClicked: {
         root.selectedId = root.motionId
+        root.openViaAlert = true
         root.toggle()
       }
     }
@@ -979,13 +1081,83 @@ Panel {
 
       Item {
         width: parent.width
+        visible: root.view === "grid"
+        height: Math.max(gridHeader.implicitHeight, gridNotifySwitch.implicitHeight,
+                         gridGearBtn.implicitHeight)
+
+        PanelSectionHeader {
+          id: gridHeader
+          anchors.left: parent.left
+          anchors.right: gridNotifySwitch.left
+          anchors.rightMargin: Style.space(8)
+          anchors.verticalCenter: parent.verticalCenter
+          text: "CAMERAS"
+          foreground: root.foreground
+          fontFamily: root.fontFamily
+        }
+
+        // Same switch as the single-camera header, just reachable from the
+        // grid too: muting popups is not a decision that should need a
+        // camera selected first.
+        ToggleSwitch {
+          id: gridNotifySwitch
+          anchors.right: gridGearBtn.left
+          anchors.rightMargin: Style.space(8)
+          anchors.verticalCenter: parent.verticalCenter
+          checked: root.notifyEnabled
+          trackHeight: Math.max(Style.space(18),
+                                Math.round(gridHeader.implicitHeight * 0.9))
+          foreground: root.foreground
+          onToggled: root.notifyEnabled = !root.notifyEnabled
+
+          PanelToolTip {
+            visible: gridNotifySwitch.containsMouse
+            text: root.notifyEnabled ? "Notifications on motion: on"
+                                     : "Notifications on motion: off"
+            fontFamily: root.fontFamily
+          }
+        }
+
+        PanelActionButton {
+          id: gridGearBtn
+          anchors.right: parent.right
+          anchors.verticalCenter: parent.verticalCenter
+          iconText: root.iconGear
+          tooltipText: "Settings"
+          foreground: root.foreground
+          fontFamily: root.fontFamily
+          onClicked: {
+            root.userWantsSettings = true
+            root.showSettings()
+          }
+        }
+      }
+
+      Item {
+        width: parent.width
         visible: root.view === "cameras"
         height: Math.max(camerasHeader.implicitHeight, gearBtn.implicitHeight,
-                         soundBtn.implicitHeight, notifySwitch.implicitHeight)
+                         soundBtn.implicitHeight, notifySwitch.implicitHeight,
+                         backToGridBtn.implicitHeight)
+
+        // Back to the tile grid: the same trip the header offers out of
+        // settings, so there is always a way back to "every camera" from
+        // wherever the panel is.
+        PanelActionButton {
+          id: backToGridBtn
+          anchors.left: parent.left
+          anchors.verticalCenter: parent.verticalCenter
+          iconText: root.iconBack
+          tooltipText: "All cameras"
+          foreground: root.foreground
+          fontFamily: root.fontFamily
+          onClicked: root.showGrid()
+        }
 
         PanelSectionHeader {
           id: camerasHeader
-          anchors.left: parent.left
+          anchors.left: backToGridBtn.right
+          anchors.leftMargin: Style.space(8)
           anchors.right: notifySwitch.left
           anchors.rightMargin: Style.space(8)
           anchors.verticalCenter: parent.verticalCenter
@@ -1024,7 +1196,7 @@ Panel {
 
         PanelActionButton {
           id: soundBtn
-          anchors.right: gearBtn.left
+          anchors.right: popoutBtn.left
           anchors.rightMargin: Style.space(8)
           anchors.verticalCenter: parent.verticalCenter
           iconText: root.soundEnabled ? root.iconSoundOn : root.iconSoundOff
@@ -1032,6 +1204,24 @@ Panel {
           foreground: root.foreground
           fontFamily: root.fontFamily
           onClicked: root.soundEnabled = !root.soundEnabled
+        }
+
+        // Detaches the camera being looked at into its own window: one that
+        // keeps playing after the panel closes, can be resized and dragged
+        // anywhere, and floats pinned above every workspace. Not offered
+        // while reviewing an archived frame -- there is no live stream to
+        // pop out until the view goes back to "live".
+        PanelActionButton {
+          id: popoutBtn
+          anchors.right: gearBtn.left
+          anchors.rightMargin: Style.space(8)
+          anchors.verticalCenter: parent.verticalCenter
+          iconText: root.iconPopout
+          tooltipText: "Pop out this camera"
+          enabled: !root.reviewing && root.selectedId !== "" && !popoutProc.running
+          foreground: root.foreground
+          fontFamily: root.fontFamily
+          onClicked: root.popout(root.selectedId)
         }
 
         PanelActionButton {
@@ -1062,7 +1252,7 @@ Panel {
           tooltipText: "Back"
           foreground: root.foreground
           fontFamily: root.fontFamily
-          onClicked: root.showCameras()
+          onClicked: root.leaveSettings()
         }
 
         PanelSectionHeader {
@@ -1074,6 +1264,118 @@ Panel {
           text: "SETTINGS"
           foreground: root.foreground
           fontFamily: root.fontFamily
+        }
+      }
+
+      Column {
+        id: gridView
+        visible: root.view === "grid"
+        width: parent.width
+        spacing: Style.space(8)
+
+        // Every camera as an equal tile, two or three rows depending on how
+        // many there are (see gridColumns). What the panel opens on, and
+        // where the back arrow in the single-camera header returns to.
+        Grid {
+          id: cameraGrid
+          width: parent.width
+          columns: root.gridColumns(root.cameras.length)
+          columnSpacing: Style.space(6)
+          rowSpacing: Style.space(6)
+
+          Repeater {
+            model: root.cameras
+
+            Rectangle {
+              required property var modelData
+
+              readonly property bool hasMotion: modelData.id === root.motionId
+
+              width: Math.floor((cameraGrid.width
+                - cameraGrid.columnSpacing * (cameraGrid.columns - 1)) / cameraGrid.columns)
+              height: Math.round(width * 9 / 16)
+              radius: Style.space(6)
+              color: Qt.rgba(0, 0, 0, 0.35)
+              clip: true
+
+              // A camera with motion right now is the one worth noticing in
+              // a grid of equals; nothing else is picked out, because
+              // "selected" has no meaning until a tile is clicked.
+              border.width: hasMotion ? Style.space(2) : 0
+              border.color: root.foreground
+
+              SmoothFrame {
+                anchors.fill: parent
+                anchors.margins: parent.border.width
+                source: root.frameFor(modelData.id)
+              }
+
+              Text {
+                textFormat: Text.PlainText
+                anchors.left: parent.left
+                anchors.bottom: parent.bottom
+                anchors.margins: Style.space(4)
+                text: modelData.name
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.caption
+                color: root.foreground
+                style: Text.Outline
+                styleColor: Qt.rgba(0, 0, 0, 0.7)
+              }
+
+              Rectangle {
+                anchors.right: parent.right
+                anchors.top: parent.top
+                anchors.margins: Style.space(4)
+                visible: hasMotion
+                width: gridMotionLabel.implicitWidth + Style.space(8)
+                height: gridMotionLabel.implicitHeight + Style.space(3)
+                radius: height / 2
+                color: Qt.rgba(0, 0, 0, 0.55)
+
+                Text {
+                  id: gridMotionLabel
+                  textFormat: Text.PlainText
+                  anchors.centerIn: parent
+                  text: "motion"
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.caption
+                  color: root.foreground
+                }
+              }
+
+              MouseArea {
+                anchors.fill: parent
+                cursorShape: Qt.PointingHandCursor
+                onClicked: root.openCamera(modelData.id)
+              }
+            }
+          }
+        }
+
+        Text {
+          textFormat: Text.PlainText
+          width: parent.width
+          visible: root.motionNotice !== ""
+          text: root.motionNotice
+          horizontalAlignment: Text.AlignHCenter
+          wrapMode: Text.WordWrap
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.caption
+          color: root.foreground
+          opacity: 0.6
+        }
+
+        Text {
+          textFormat: Text.PlainText
+          width: parent.width
+          visible: !root.hasCameras
+          text: root.needsSetup ? "Needs setup" : (root.reachable ? "No cameras found" : "Protect unreachable")
+          horizontalAlignment: Text.AlignHCenter
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.caption
+          color: root.foreground
+          opacity: 0.6
         }
       }
 

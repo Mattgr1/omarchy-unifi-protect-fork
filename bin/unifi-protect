@@ -10,6 +10,9 @@
 #   unifi-protect cached           # newest snapshot on disk per camera, no network
 #   unifi-protect stream <id>      # prints the RTSP url of the live stream
 #   unifi-protect live <id>        # opens the live RTSPS stream in mpv
+#   unifi-protect popout <id> [name]
+#                                  # opens the camera in its own detached mpv
+#                                  # window, for the panel's pop-out button
 #   unifi-protect watch            # streams motion as NDJSON, one event per line
 #   unifi-protect status           # {ok, hasKey, trusted, host}, no network
 #   unifi-protect set-key          # writes a key from stdin to the key file
@@ -586,6 +589,43 @@ case "${1:-list}" in
     exec mpv --title="UniFi camera" \
       --rtsp-transport=tcp --demuxer-lavf-o=tls_verify=0 \
       --profile=low-latency --no-terminal -- "$url"
+    ;;
+
+  popout)
+    # Same stream as `live`, but detached rather than exec'd: the panel calls
+    # this from a button and needs the window to keep playing after the
+    # script that started it has exited, whether that is because the popup
+    # closed or because the shell that ran it got reloaded. `setsid -f`
+    # starts mpv in a session of its own and forks immediately rather than
+    # waiting, so the window outlives whatever launched it -- the same
+    # relationship a terminal has with a program you background and then
+    # close the terminal on.
+    id="${2:-}"
+    name="${3:-}"
+    [[ -n "$id" ]] || fail "usage: unifi-protect popout <camera-id> [name]"
+    check_id "$id"
+    require_key
+    tls_args
+    url="$(api "/cameras/$id/rtsps-stream" | jq -r '.high // .medium // .low // empty')"
+    [[ -n "$url" ]] || fail "no stream for camera $id"
+    valid_stream_url "$url" || fail "not a stream url"
+
+    # The window rule that floats and pins this matches on the title, not on
+    # a lowercase one substring away from the plain `live` command's, so the
+    # two never collide.
+    title="UniFi Camera"
+    [[ -n "$name" ]] && title="UniFi Camera: $name"
+
+    command -v setsid >/dev/null 2>&1 || fail "setsid is needed to pop out a camera"
+    # A app id of its own, not mpv's default, is what lets a Hyprland window
+    # rule single this window out -- to float, pin and size it -- without
+    # touching every other mpv window on the desktop, including the one
+    # `live` above opens.
+    setsid -f mpv --title="$title" --wayland-app-id=unifi-protect-popout \
+      --rtsp-transport=tcp --demuxer-lavf-o=tls_verify=0 \
+      --profile=low-latency --no-terminal -- "$url" \
+      >/dev/null 2>&1 < /dev/null
+    printf '{"ok":true}\n'
     ;;
 
   watch)
